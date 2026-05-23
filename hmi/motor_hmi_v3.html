@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Motor Control HMI</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#070d07; font-family:'Courier New',monospace; color:#00cc66; padding:12px 14px; user-select:none; }
+button { cursor:pointer; font-family:'Courier New',monospace; font-weight:bold; letter-spacing:2px; border-radius:2px; border:none; }
+input[type=range] { width:100%; cursor:pointer; display:block; }
+.panel { background:#090f09; border:1px solid #142014; border-radius:3px; }
+#header { display:flex; align-items:center; border-bottom:1px solid #142014; padding-bottom:10px; margin-bottom:12px; gap:8px; }
+#gauges { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:10px 8px; margin-bottom:10px; }
+#controls { display:grid; grid-template-columns:1fr 1fr 2fr; gap:8px; margin-bottom:10px; }
+#tabs { display:flex; gap:2px; }
+.tab-btn { padding:4px 12px; font-size:9px; letter-spacing:2px; font-family:'Courier New',monospace; border-radius:2px 2px 0 0; cursor:pointer; }
+#tabcontent { border-radius:0 2px 2px 2px; padding:12px; }
+.reg-box { background:#070d07; border:1px solid #142014; padding:4px 6px; border-radius:2px; }
+.reg-addr { font-size:8px; color:#1a4a1a; }
+.reg-val { font-size:11px; color:#00cc66; font-weight:bold; margin-top:1px; }
+.reg-label { font-size:8px; color:#1a4a1a; }
+.slider-row { margin-bottom:10px; }
+.slider-label { display:flex; justify-content:space-between; margin-bottom:3px; font-size:10px; color:#3a6a3a; }
+.slider-val { font-size:11px; font-weight:bold; }
+.divider { height:1px; background:#142014; margin:10px 0; }
+#bridge-warn { background:#1a0f00; border:1px solid #3a2a00; border-radius:2px; padding:6px 10px; margin-bottom:10px; font-size:9px; color:#aa7700; display:none; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="header" class="panel" style="padding:8px 12px; margin-bottom:12px; border-radius:3px;">
+  <div style="font-size:9px;color:#1a4a1a;letter-spacing:4px;border:1px solid #1a3a1a;padding:2px 6px;">OPENPLC RT</div>
+  <div style="flex:1;font-size:13px;font-weight:bold;letter-spacing:3px;color:#00ee77;">MOTOR SPEED CONTROL</div>
+  <div id="modeBadge" style="font-size:9px;padding:2px 8px;border-radius:2px;">○ SIMULATION</div>
+  <div id="statusBadge" style="font-size:10px;padding:2px 8px;letter-spacing:2px;border-radius:2px;">■ STOPPED</div>
+</div>
+
+<!-- BRIDGE WARNING -->
+<div id="bridge-warn">
+  ○ Bridge not connected — simulation mode active. Run: <b style="color:#ffaa00">python bridge.py</b>
+</div>
+
+<!-- GAUGES -->
+<div id="gauges" class="panel">
+  <div style="text-align:center;"><canvas id="g0" width="110" height="110"></canvas><div style="color:#3a6a3a;font-size:10px;letter-spacing:1px;margin-top:2px;">ACTUAL RPM</div></div>
+  <div style="text-align:center;"><canvas id="g1" width="110" height="110"></canvas><div style="color:#3a6a3a;font-size:10px;letter-spacing:1px;margin-top:2px;">RAMPED SP</div></div>
+  <div style="text-align:center;"><canvas id="g2" width="110" height="110"></canvas><div style="color:#3a6a3a;font-size:10px;letter-spacing:1px;margin-top:2px;">SETPOINT</div></div>
+  <div style="text-align:center;"><canvas id="g3" width="110" height="110"></canvas><div style="color:#3a6a3a;font-size:10px;letter-spacing:1px;margin-top:2px;">PWM OUTPUT</div></div>
+</div>
+
+<!-- CONTROLS -->
+<div id="controls">
+  <button id="btnEnable" style="padding:10px 0;font-size:11px;background:#0a0f0a;border:1px solid #1a3a1a;color:#2a5a2a;">▶ ENABLE</button>
+  <button id="btnLoad"   style="padding:10px 0;font-size:11px;background:#0a0f0a;border:1px solid #1a3a1a;color:#2a5a2a;">○ LOAD OFF</button>
+  <div class="panel" style="padding:6px 12px;">
+    <div class="slider-label"><span>SETPOINT</span><span class="slider-val" style="color:#ffaa00;" id="spLabel">0% → 0 RPM</span></div>
+    <input id="slSp" type="range" min="0" max="100" step="1" value="0" style="accent-color:#ffaa00;">
+  </div>
+</div>
+
+<!-- TABS -->
+<div id="tabs">
+  <button class="tab-btn" data-tab="monitor"    style="background:#090f09;border:1px solid #00ff88;color:#00ff88;">MONITOR</button>
+  <button class="tab-btn" data-tab="pid"        style="background:#070d07;border:1px solid #142014;color:#2a5a2a;">PID TUNING</button>
+  <button class="tab-btn" data-tab="system"     style="background:#070d07;border:1px solid #142014;color:#2a5a2a;">SYSTEM</button>
+</div>
+
+<!-- TAB CONTENT -->
+<div id="tabcontent" class="panel">
+
+  <!-- MONITOR TAB -->
+  <div id="tab-monitor">
+    <div style="font-size:9px;color:#1a4a1a;letter-spacing:3px;margin-bottom:6px;">SPEED TREND (RPM)</div>
+    <canvas id="chartRpm" width="800" height="130" style="width:100%;display:block;"></canvas>
+    <div style="font-size:9px;color:#1a4a1a;letter-spacing:3px;margin-top:10px;margin-bottom:6px;">PWM OUTPUT (%)</div>
+    <canvas id="chartPwm" width="800" height="70" style="width:100%;display:block;"></canvas>
+    <div style="margin-top:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;">
+      <div class="reg-box"><div class="reg-addr">%QW1</div><div class="reg-val" id="r0">0</div><div class="reg-label">ACTUAL RPM</div></div>
+      <div class="reg-box"><div class="reg-addr">%QW2</div><div class="reg-val" id="r1">0</div><div class="reg-label">RAMPED SP</div></div>
+      <div class="reg-box"><div class="reg-addr">%QW3</div><div class="reg-val" id="r2">0</div><div class="reg-label">PID OUT×100</div></div>
+      <div class="reg-box"><div class="reg-addr">%QX0.0</div><div class="reg-val" id="r3">FALSE</div><div class="reg-label">FAULT</div></div>
+    </div>
+  </div>
+
+  <!-- PID TAB -->
+  <div id="tab-pid" style="display:none;">
+    <div style="font-size:9px;color:#ff5577;letter-spacing:2px;margin-bottom:12px;">⚠ LIVE — writes Kp/Ki/Kd/Accel straight to the PLC registers</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+      <div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Kp — Proportional</span><span class="slider-val" style="color:#00ff88;" id="vKp">0.80</span></div>
+          <input type="range" min="0" max="3" step="0.01" value="0.80" id="slKp" style="accent-color:#00ff88;">
+        </div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Ki — Integral</span><span class="slider-val" style="color:#00aaff;" id="vKi">0.15</span></div>
+          <input type="range" min="0" max="1" step="0.005" value="0.15" id="slKi" style="accent-color:#00aaff;">
+        </div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Kd — Derivative</span><span class="slider-val" style="color:#ffaa00;" id="vKd">0.04</span></div>
+          <input type="range" min="0" max="0.5" step="0.002" value="0.04" id="slKd" style="accent-color:#ffaa00;">
+        </div>
+        <div class="divider"></div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Max Accel (RPM/s)</span><span class="slider-val" style="color:#ff5577;" id="vAccel">500</span></div>
+          <input type="range" min="50" max="2000" step="10" value="500" id="slAccel" style="accent-color:#ff5577;">
+        </div>
+      </div>
+      <div style="font-size:9px;color:#2a5a2a;line-height:2.1;">
+        <div style="color:#00ff88;margin-bottom:6px;">TUNING STEPS:</div>
+        <div><span style="color:#ffaa00;">1.</span> Set Ki=0, Kd=0</div>
+        <div><span style="color:#ffaa00;">2.</span> Increase Kp → until oscillation</div>
+        <div><span style="color:#ffaa00;">3.</span> Back off Kp to ~60%</div>
+        <div><span style="color:#ffaa00;">4.</span> Add Ki → eliminate steady-state error</div>
+        <div><span style="color:#ffaa00;">5.</span> Add Kd → reduce overshoot</div>
+        <div class="divider"></div>
+        <div style="color:#ffaa00;">Test with LOAD button!</div>
+        <div>Watch Ki correct the</div>
+        <div>disturbance back to setpoint.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SYSTEM TAB -->
+  <div id="tab-system" style="display:none;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+      <div>
+        <div style="font-size:9px;color:#1a4a1a;letter-spacing:2px;margin-bottom:8px;">MOTOR MODEL (Simulation)</div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Time constant τ (s)</span><span class="slider-val" style="color:#00aaff;" id="vTau">0.50s</span></div>
+          <input type="range" min="0.05" max="2" step="0.05" value="0.5" id="slTau" style="accent-color:#00aaff;">
+        </div>
+        <div class="slider-row">
+          <div class="slider-label"><span>Motor gain Km (RPM/%)</span><span class="slider-val" style="color:#00ff88;" id="vKm">30 RPM/%</span></div>
+          <input type="range" min="10" max="50" step="1" value="30" id="slKm" style="accent-color:#00ff88;">
+        </div>
+        <div class="divider"></div>
+        <div style="font-size:9px;color:#2a5a2a;line-height:1.9;">
+          <div style="color:#1a4a1a;">Motor equation (Euler):</div>
+          <div>ω[k+1] = ω[k] + (Ts/τ)×</div>
+          <div style="padding-left:8px;">(Km×u − ω[k] − Load)</div>
+        </div>
+        <div class="divider"></div>
+        <div id="sysMode" style="font-size:10px;color:#ffaa00;font-weight:bold;">○ SIMULATION</div>
+        <div style="font-size:8px;color:#1a4a1a;margin-top:4px;">Bridge: localhost:5000 | Modbus: localhost:502</div>
+      </div>
+      <div style="font-size:9px;color:#2a5a2a;line-height:2.2;">
+        <div style="color:#00ff88;letter-spacing:2px;margin-bottom:6px;">I/O MAPPING (RPi)</div>
+        <div><span style="color:#ffaa00;">%IX0.1</span>  ← Enable button</div>
+        <div><span style="color:#ffaa00;">%IW0</span>    ← Setpoint ADC</div>
+        <div><span style="color:#00aaff;">%QW0</span>    → PWM output</div>
+        <div><span style="color:#00aaff;">%QW1</span>    → Actual RPM</div>
+        <div><span style="color:#00aaff;">%QW2</span>    → Ramped SP</div>
+        <div><span style="color:#00aaff;">%QW3</span>    → PWM×100</div>
+        <div><span style="color:#00aaff;">%QX0.0</span>  → Fault LED</div>
+        <div class="divider"></div>
+        <div style="color:#1a4a1a;">Scan: 10ms | Meas: 100ms</div>
+        <div style="color:#1a4a1a;">PPR: 20 | Max: 3000 RPM</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────
+const BRIDGE  = "http://localhost:5000";
+const MAX_RPM = 3000;
+const DT      = 0.010;
+const CHART_N = 400;
+
+// ── State ─────────────────────────────────────────────────
+let S = { rpm_actual:0, rpm_ramped:0, rpm_setpoint:0, pwm_percent:0, fault:false, pid_integral:0, last_error:0, stall_count:0 };
+let P = { Kp:0.80, Ki:0.15, Kd:0.04, max_accel:500, motor_tau:0.5, motor_gain:30, load:0 };
+let enabled = false;
+let spPct   = 0;
+let live    = false;
+let chart   = [];
+let activeTab = "monitor";
+let bridgeFails = 0;
+
+// ── Simulation step ───────────────────────────────────────
+function simStep() {
+  const sp = enabled ? (spPct/100)*MAX_RPM : 0;
+  S.rpm_setpoint = sp;
+  const ms = P.max_accel * DT;
+  const d  = sp - S.rpm_ramped;
+  S.rpm_ramped += d > ms ? ms : d < -ms ? -ms : d;
+  if (!enabled) {
+    S.rpm_ramped = S.rpm_actual;
+    S.pid_integral = 0; S.last_error = 0; S.pwm_percent = 0;
+    return;
+  }
+  const err = S.rpm_ramped - S.rpm_actual;
+  S.pid_integral = Math.max(-80, Math.min(80, S.pid_integral + err*DT));
+  const der = (err - S.last_error) / DT;
+  S.last_error = err;
+  S.pwm_percent = Math.max(0, Math.min(100, P.Kp*err + P.Ki*S.pid_integral + P.Kd*der));
+  const nrpm = S.rpm_actual + (DT/P.motor_tau)*(P.motor_gain*S.pwm_percent - P.load - S.rpm_actual);
+  S.stall_count = (enabled && S.rpm_ramped>100 && nrpm<50) ? S.stall_count+DT : 0;
+  S.fault = S.stall_count >= 2.0;
+  if (S.fault) { S.pwm_percent=0; S.rpm_actual=0; }
+  else S.rpm_actual = Math.max(0, nrpm);
+}
+
+// ── Gauge drawing ─────────────────────────────────────────
+function drawGauge(canvas, value, max, color) {
+  const ctx = canvas.getContext("2d");
+  const s=canvas.width, cx=s/2, cy=s/2, r=s*0.37;
+  ctx.clearRect(0,0,s,s);
+  const pct = Math.min(1, Math.max(0, value/max));
+  const xy = (deg,rad) => ({x:cx+rad*Math.cos((deg-90)*Math.PI/180), y:cy+rad*Math.sin((deg-90)*Math.PI/180)});
+  // bg arc
+  ctx.strokeStyle="#152015"; ctx.lineWidth=s*0.075; ctx.lineCap="round";
+  ctx.beginPath(); ctx.arc(cx,cy,r,(-135-90)*Math.PI/180,(135-90)*Math.PI/180); ctx.stroke();
+  // value arc
+  if (pct>0.001) {
+    ctx.strokeStyle=color; ctx.lineWidth=s*0.075;
+    ctx.beginPath(); ctx.arc(cx,cy,r,(-135-90)*Math.PI/180,(-135+pct*270-90)*Math.PI/180); ctx.stroke();
+  }
+  // ticks
+  ctx.fillStyle="#1a3a1a";
+  [-135,-90,-45,0,45,90,135].forEach(deg=>{const p=xy(deg,r*1.18);ctx.beginPath();ctx.arc(p.x,p.y,1.5,0,2*Math.PI);ctx.fill();});
+  // needle
+  const n=xy(-135+pct*270,r*0.75);
+  ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(n.x,n.y); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(cx,cy,s*0.045,0,2*Math.PI); ctx.fill();
+  // value text
+  ctx.fillStyle=color; ctx.textAlign="center";
+  ctx.font=`bold ${Math.round(s*0.17)}px 'Courier New'`;
+  ctx.fillText(Math.round(value), cx, cy+s*0.22);
+  ctx.fillStyle="#3a6a3a"; ctx.font=`${Math.round(s*0.09)}px monospace`;
+  ctx.fillText(value>999?"RPM":value>99?"%":"", cx, cy+s*0.35);
+}
+
+// ── Chart drawing ─────────────────────────────────────────
+function drawSpeedChart() {
+  const canvas = document.getElementById("chartRpm");
+  if(!canvas) return;
+  const ctx=canvas.getContext("2d"), w=canvas.width, h=canvas.height;
+  ctx.fillStyle="#070d07"; ctx.fillRect(0,0,w,h);
+  for(let i=1;i<4;i++){ctx.strokeStyle="#0c180c";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,h/4*i);ctx.lineTo(w,h/4*i);ctx.stroke();}
+  if(chart.length<2) return;
+  [["sp","#ffaa00",1,[3,3]],["ramp","#00aaff",1,[]],["actual","#00ff88",2,[]]].forEach(([k,c,lw,dash])=>{
+    ctx.strokeStyle=c; ctx.lineWidth=lw; ctx.setLineDash(dash); ctx.beginPath();
+    chart.forEach((pt,i)=>{const x=(i/(CHART_N-1))*w,y=h-(pt[k]/MAX_RPM)*h; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  ctx.font="9px 'Courier New'"; ctx.textAlign="left";
+  [["Setpoint","#ffaa00",4],["Ramped","#00aaff",58],["Actual","#00ff88",108]].forEach(([l,c,x])=>{ctx.fillStyle=c;ctx.fillText(l,x,12);});
+}
+
+function drawPwmChart() {
+  const canvas = document.getElementById("chartPwm");
+  if(!canvas) return;
+  const ctx=canvas.getContext("2d"), w=canvas.width, h=canvas.height;
+  ctx.fillStyle="#070d07"; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle="#0c180c";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,h/2);ctx.lineTo(w,h/2);ctx.stroke();
+  if(chart.length<2) return;
+  ctx.strokeStyle="#ff5577"; ctx.lineWidth=1.5; ctx.setLineDash([]); ctx.beginPath();
+  chart.forEach((pt,i)=>{const x=(i/(CHART_N-1))*w,y=h-(pt.pwm/100)*h; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.stroke();
+}
+
+// ── Update DOM (only values, not structure) ───────────────
+function updateDOM() {
+  const fc = S.fault?"#ff3333":enabled?"#00ff88":"#2a4a2a";
+  const ft = S.fault?"⚠ STALL FAULT":enabled?"● RUNNING":"■ STOPPED";
+  const mc = live?"#00aaff":"#ffaa00";
+  const mt = live?"● OPENPLC LIVE":"○ SIMULATION";
+
+  // Header badges
+  const mb=document.getElementById("modeBadge");
+  mb.textContent=mt; mb.style.color=mc; mb.style.border=`1px solid ${mc}44`; mb.style.background=mc+"11";
+  const sb=document.getElementById("statusBadge");
+  sb.textContent=ft; sb.style.color=fc; sb.style.border=`1px solid ${fc}44`; sb.style.background=fc+"11";
+
+  // Gauges
+  drawGauge(document.getElementById("g0"), S.rpm_actual,  MAX_RPM, "#00ff88");
+  drawGauge(document.getElementById("g1"), S.rpm_ramped,  MAX_RPM, "#00aaff");
+  drawGauge(document.getElementById("g2"), S.rpm_setpoint,MAX_RPM, "#ffaa00");
+  drawGauge(document.getElementById("g3"), S.pwm_percent, 100,     "#ff5577");
+
+  // Registers
+  document.getElementById("r0").textContent = Math.round(S.rpm_actual);
+  document.getElementById("r1").textContent = Math.round(S.rpm_ramped);
+  document.getElementById("r2").textContent = Math.round(S.pwm_percent*100);
+  const r3=document.getElementById("r3");
+  r3.textContent=S.fault?"TRUE":"FALSE"; r3.style.color=S.fault?"#ff3333":"#00cc66";
+
+  // System tab mode label
+  const sm=document.getElementById("sysMode");
+  if(sm){sm.textContent=mt;sm.style.color=mc;}
+
+  // Bridge warning banner
+  document.getElementById("bridge-warn").style.display = live?"none":"block";
+
+  // Charts (only if visible)
+  if(activeTab==="monitor"){ drawSpeedChart(); drawPwmChart(); }
+}
+
+// ── Push chart point ──────────────────────────────────────
+function pushChart() {
+  chart.push({ sp:S.rpm_setpoint, ramp:S.rpm_ramped, actual:S.rpm_actual, pwm:S.pwm_percent });
+  if(chart.length>CHART_N) chart.shift();
+}
+
+// ── Bridge polling (separate interval, stable) ────────────
+let pollActive = false;
+setInterval(async()=>{
+  if(pollActive) return; // skip if previous still pending
+  pollActive = true;
+  try {
+    const res = await fetch(`${BRIDGE}/state`, {signal:AbortSignal.timeout(800)});
+    if(res.ok) {
+      const d = await res.json();
+      if(d.connected) {
+        live = true;
+        bridgeFails = 0;
+        S.rpm_actual  = d.rpm_actual  || 0;
+        S.rpm_ramped  = d.rpm_ramped  || 0;
+        S.pwm_percent = d.pwm_percent || 0;
+        S.fault       = d.fault       || false;
+        S.rpm_setpoint= spPct/100*MAX_RPM;
+        // Sync PID sliders from PLC (only if user isn't dragging that slider right now)
+        if(d.kp!==undefined) syncPidSlider("slKp","vKp",d.kp,2,"Kp");
+        if(d.ki!==undefined) syncPidSlider("slKi","vKi",d.ki,3,"Ki");
+        if(d.kd!==undefined) syncPidSlider("slKd","vKd",d.kd,3,"Kd");
+        if(d.accel!==undefined) syncAccelSlider(d.accel);
+        pushChart();
+      } else {
+        bridgeFails++;
+        if(bridgeFails>3) live=false;
+      }
+    } else { bridgeFails++; if(bridgeFails>3) live=false; }
+  } catch { bridgeFails++; if(bridgeFails>3) live=false; }
+  pollActive = false;
+}, 150);
+
+// ── Send commands to bridge ───────────────────────────────
+async function sendEnable(v) {
+  try { await fetch(`${BRIDGE}/enable`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:v}),signal:AbortSignal.timeout(500)}); } catch{}
+}
+async function sendSp(v) {
+  try { await fetch(`${BRIDGE}/setpoint`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({percent:v}),signal:AbortSignal.timeout(500)}); } catch{}
+}
+// Debounced PID push: slider drags fire many events; only send the latest after 120ms idle.
+let pidTimer = null;
+function sendPid(partial) {
+  if(pidTimer) clearTimeout(pidTimer);
+  pidTimer = setTimeout(async()=>{
+    try { await fetch(`${BRIDGE}/pid`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(partial),signal:AbortSignal.timeout(500)}); } catch{}
+  }, 120);
+}
+// Track which slider the user is actively dragging, so PLC readback doesn't fight them.
+let dragging = null;
+function syncPidSlider(sliderId, valId, value, dec, simKey){
+  if(dragging===sliderId) return;            // user is dragging this one, leave it
+  const sl=document.getElementById(sliderId);
+  if(Math.abs(parseFloat(sl.value)-value) > Math.pow(10,-dec)){
+    sl.value = value;
+    document.getElementById(valId).textContent = value.toFixed(dec);
+    P[simKey] = value;                          // keep sim model in sync too
+  }
+}
+function syncAccelSlider(value){
+  if(dragging==="slAccel") return;
+  const sl=document.getElementById("slAccel");
+  if(parseFloat(sl.value)!==value){
+    sl.value=value;
+    document.getElementById("vAccel").textContent=value;
+    P.max_accel=value;
+  }
+}
+
+// ── Simulation loop ───────────────────────────────────────
+let lastT = performance.now();
+function loop(now) {
+  const dt = Math.min(now-lastT, 80); lastT=now;
+  if(!live) {
+    const n = Math.round(dt/(DT*1000));
+    for(let i=0;i<n;i++) simStep();
+    pushChart();
+  }
+  updateDOM();
+  requestAnimationFrame(loop);
+}
+
+// ── Event listeners (set once, never re-created) ──────────
+document.getElementById("btnEnable").addEventListener("click",()=>{
+  enabled = !enabled;
+  if(!enabled){ S.stall_count=0; S.fault=false; S.pid_integral=0; }
+  const btn=document.getElementById("btnEnable");
+  btn.textContent = enabled?"■ DISABLE":"▶ ENABLE";
+  btn.style.background = enabled?"#002a12":"#0a0f0a";
+  btn.style.border = `1px solid ${enabled?"#00ff88":"#1a3a1a"}`;
+  btn.style.color = enabled?"#00ff88":"#2a5a2a";
+  sendEnable(enabled);
+});
+
+document.getElementById("btnLoad").addEventListener("click",()=>{
+  P.load = P.load===0 ? 600 : 0;
+  const btn=document.getElementById("btnLoad");
+  btn.textContent = P.load>0?"⚡ LOAD ON":"○ LOAD OFF";
+  btn.style.background = P.load>0?"#1a0005":"#0a0f0a";
+  btn.style.border = `1px solid ${P.load>0?"#ff3344":"#1a3a1a"}`;
+  btn.style.color = P.load>0?"#ff3344":"#2a5a2a";
+});
+
+document.getElementById("slSp").addEventListener("input",e=>{
+  spPct = parseFloat(e.target.value);
+  document.getElementById("spLabel").textContent = `${spPct}% → ${Math.round(spPct/100*MAX_RPM)} RPM`;
+  sendSp(spPct);
+});
+
+// PID sliders — update local sim AND push to PLC when live
+[["slKp","Kp","vKp",2,"kp"],["slKi","Ki","vKi",3,"ki"],["slKd","Kd","vKd",3,"kd"]].forEach(([id,key,vid,dec,pidKey])=>{
+  const el=document.getElementById(id);
+  el.addEventListener("pointerdown",()=>{dragging=id;});
+  el.addEventListener("pointerup",()=>{dragging=null;});
+  el.addEventListener("input",e=>{
+    P[key]=parseFloat(e.target.value);
+    document.getElementById(vid).textContent=P[key].toFixed(dec);
+    if(live){ const o={}; o[pidKey]=P[key]; sendPid(o); }
+  });
+});
+(function(){
+  const el=document.getElementById("slAccel");
+  el.addEventListener("pointerdown",()=>{dragging="slAccel";});
+  el.addEventListener("pointerup",()=>{dragging=null;});
+  el.addEventListener("input",e=>{
+    P.max_accel=parseFloat(e.target.value);
+    document.getElementById("vAccel").textContent=P.max_accel;
+    if(live){ sendPid({accel:P.max_accel}); }
+  });
+})();
+document.getElementById("slTau").addEventListener("input",e=>{P.motor_tau=parseFloat(e.target.value);document.getElementById("vTau").textContent=P.motor_tau.toFixed(2)+"s";});
+document.getElementById("slKm").addEventListener("input",e=>{P.motor_gain=parseFloat(e.target.value);document.getElementById("vKm").textContent=P.motor_gain+" RPM/%";});
+
+// Tabs
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    activeTab = btn.dataset.tab;
+    document.querySelectorAll(".tab-btn").forEach(b=>{
+      const active = b.dataset.tab===activeTab;
+      b.style.background = active?"#090f09":"#070d07";
+      b.style.border = `1px solid ${active?"#00ff88":"#142014"}`;
+      b.style.color = active?"#00ff88":"#2a5a2a";
+    });
+    ["monitor","pid","system"].forEach(t=>{
+      document.getElementById("tab-"+t).style.display = (t===activeTab||(t==="pid"&&activeTab==="pid"))?"block":"none";
+    });
+    // fix: tab id vs activeTab mismatch for pid
+    document.getElementById("tab-monitor").style.display = activeTab==="monitor"?"block":"none";
+    document.getElementById("tab-pid").style.display     = activeTab==="pid"?"block":"none";
+    document.getElementById("tab-system").style.display  = activeTab==="system"?"block":"none";
+  });
+});
+
+// ── Start ─────────────────────────────────────────────────
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
