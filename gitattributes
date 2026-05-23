@@ -1,0 +1,2 @@
+# Tell GitHub Linguist that .st here is IEC 61131-3 Structured Text, not Smalltalk
+*.st linguist-language=Structured-Text
