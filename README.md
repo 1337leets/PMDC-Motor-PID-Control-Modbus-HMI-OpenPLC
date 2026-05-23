@@ -17,7 +17,7 @@ programming (IEC 61131-3 Structured Text), and PID control**.
 ## What it does
 
 - A first-order PMDC motor model runs in Structured Text on the OpenPLC runtime.
-- A **PI controller** (lambda-tuned, with anti-windup and a filtered derivative term)
+- A **PID controller** (lambda-tuned, with anti-windup and a filtered derivative term)
   regulates the simulated motor speed toward an operator setpoint.
 - A **ramp limiter** smooths the setpoint so the controller never sees a step input —
   the operator can move the slider as fast as they like and the motor follows at a safe rate.
@@ -51,7 +51,7 @@ The plant is a first-order PMDC motor:
 discretised with forward Euler at a 10 ms scan time.
 
 The controller is tuned with **lambda (IMC) tuning** rather than trial-and-error. For a
-first-order plant `G(s) = K/(τs+1)`, a PI controller gives a first-order *closed* loop —
+first-order plant `G(s) = K/(τs+1)`, a PID controller gives a first-order *closed* loop —
 which by construction has no overshoot. The single design knob is λ, the closed-loop time
 constant:
 
