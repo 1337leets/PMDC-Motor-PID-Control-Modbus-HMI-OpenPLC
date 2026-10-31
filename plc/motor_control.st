@@ -105,15 +105,15 @@ END_IF;
 IF enable_btn THEN
     pid_error := rpm_ramped - rpm_filtered;
 
-    (* Deadband: cok kucuk hatalarda integrali dondur *)
+    (* Deadband: freeze the integral on very small errors *)
     IF (pid_error < DEADBAND_RPM) AND (pid_error > (-1.0 * DEADBAND_RPM)) THEN
         pid_error := 0.0;
     END_IF;
 
-    (* Onceki ciktiyi hesapla (anti-windup karari icin) *)
+    (* Compute the previous output (for the anti-windup decision) *)
     pid_output := Kp * pid_error + Ki * pid_integral + Kd * pid_derivative;
 
-    (* Conditional integration: sadece PWM doygun degilken integrali artir *)
+    (* Conditional integration: grow the integral only while PWM is not saturated *)
     IF (pid_output < 100.0) AND (pid_output > 0.0) THEN
         pid_integral := pid_integral + pid_error * CYCLE_TIME_S;
         IF pid_integral >  INTEGRAL_LIMIT THEN pid_integral :=  INTEGRAL_LIMIT; END_IF;
@@ -125,7 +125,7 @@ IF enable_btn THEN
     pid_derivative := D_FILTER * d_raw + (1.0 - D_FILTER) * pid_derivative;
     last_rpm := rpm_filtered;
 
-    (* Cikti tekrar hesapla (guncel integral ile) *)
+    (* Recompute the output (with the updated integral) *)
     pid_output := Kp * pid_error + Ki * pid_integral + Kd * pid_derivative;
 
     IF    pid_output > 100.0 THEN pwm_percent := 100.0;
