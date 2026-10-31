@@ -14,6 +14,9 @@ programming (IEC 61131-3 Structured Text), and PID control**.
 
 ![Live demo](docs/demo.gif)
 
+Try the HMI in your browser at <https://1337leets.github.io/PMDC-Motor-PID-Control-Modbus-HMI-OpenPLC/hmi/motor_hmi_v3.html>.
+Without the bridge and the PLC it runs in simulation mode, using its JavaScript copy of the control loop.
+
 ## What it does
 
 - A first-order PMDC motor model runs in Structured Text on the OpenPLC runtime.
