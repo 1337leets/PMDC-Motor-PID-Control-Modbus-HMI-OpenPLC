@@ -1,2 +1,5 @@
 # Tell GitHub Linguist that .st (IEC 61131-3 Structured Text) here is PASCAL, not Smalltalk
 *.st linguist-language=Pascal
+# Show the control code as the main language, not the web HMI or the bridge
+*.html linguist-detectable=false
+*.py linguist-detectable=false
